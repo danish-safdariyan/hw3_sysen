@@ -359,7 +359,9 @@ def main() -> None:
     print(f"  approx_llm_calls={total_calls} (generate + validate per replicate)")
     df = run_experiment(RunConfig(n_replicates=args.n_replicates, save_full_reports=args.save_full_reports))
     csv_path = OUT_DIR / "hw3_validation_scores.csv"
-    df.to_csv(csv_path, index=False)
+    tmp_path = csv_path.with_suffix(csv_path.suffix + ".tmp")
+    df.to_csv(tmp_path, index=False)
+    tmp_path.replace(csv_path)
     print(f"\n💾 Wrote: {csv_path}")
     summarize_and_test(df)
     print("\n✅ Done.")
