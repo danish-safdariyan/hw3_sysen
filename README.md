@@ -31,7 +31,18 @@ Outputs:
 - `outputs/hw3_validation_scores.csv`
 - `outputs/report_promptA_rep001.txt` (and similar), if full reports are saved
 
+## Local Ollama
+
+1. Install and start [Ollama](https://ollama.com/).
+2. Set `HW3_AI_PROVIDER=ollama` in `.env` and set `OLLAMA_MODEL` to a name from `ollama list`. Pull if needed, e.g. `ollama pull qwen2.5:7b-instruct`.
+3. **Fast sanity check** (about 18 LLM calls):  
+   `python3 hw3_report_validation_experiment.py --quick`
+4. **Heavier run for the assignment** (about 180 calls with default `HW3_N_REPLICATES=30`):  
+   `python3 hw3_report_validation_experiment.py`  
+   Or a middle ground: `--n-replicates 10`.
+
+The script verifies your Ollama model is installed before the long loop (avoids a confusing HTTP 404).
+
 ## Course submission
 
-Submit **one .docx** per `HOMEWORK3.md` (writing in your own words, not AI-generated). Use screenshots from your run, links to this new repo, and the documentation table described in the homework.
-# hw3_sysen
+Submit **one .docx** per `HOMEWORK3.md` (writing in your own words, not "AI-generated"). Use screenshots from your run, links to your git repo, and the documentation table described in the homework.

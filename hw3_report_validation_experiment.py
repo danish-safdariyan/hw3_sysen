@@ -22,10 +22,12 @@ import argparse
 import json
 import os
 import re
+import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 import requests
 from dotenv import load_dotenv
@@ -48,7 +50,7 @@ OUT_DIR.mkdir(parents=True, exist_ok=True)
 AI_PROVIDER = os.getenv("HW3_AI_PROVIDER", "ollama").strip().lower()
 
 OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434").rstrip("/")
-OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3.2:latest")
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "").strip() or "llama3.2:latest"
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
@@ -100,6 +102,39 @@ PROMPTS = {
         "Use a cautious tone.\n"
     ),
 }
+
+
+def _line_buffer_stdout() -> None:
+    try:
+        sys.stdout.reconfigure(line_buffering=True)
+    except (AttributeError, OSError, ValueError):
+        pass
+
+
+def _ollama_model_names() -> list[str]:
+    url = f"{OLLAMA_HOST}/api/tags"
+    resp = requests.get(url, timeout=30)
+    resp.raise_for_status()
+    data = resp.json()
+    return [m["name"] for m in data.get("models", []) if "name" in m]
+
+
+def ensure_local_ollama_ready() -> None:
+    if AI_PROVIDER != "ollama":
+        return
+    try:
+        names = set(_ollama_model_names())
+    except requests.RequestException as e:
+        raise RuntimeError(
+            f"Cannot reach Ollama at {OLLAMA_HOST} ({e}). "
+            "Start Ollama or set OLLAMA_HOST in .env."
+        ) from e
+    if OLLAMA_MODEL not in names:
+        avail = ", ".join(sorted(names)) if names else "(none — run `ollama pull <model>`)"
+        raise RuntimeError(
+            f"Model {OLLAMA_MODEL!r} is not installed locally. Installed: {avail}. "
+            f"Set OLLAMA_MODEL in .env to one of these names, or run: ollama pull {OLLAMA_MODEL}"
+        )
 
 
 def _ollama_chat(messages: list[dict], format_json: bool) -> str:
@@ -238,9 +273,12 @@ def run_experiment(cfg: RunConfig) -> pd.DataFrame:
     rows: list[dict] = []
     for prompt_id in ["A", "B", "C"]:
         for rep in range(1, cfg.n_replicates + 1):
-            print(f"🧪 prompt={prompt_id} replicate={rep}/{cfg.n_replicates} | generating...")
+            print(
+                f"🧪 prompt={prompt_id} replicate={rep}/{cfg.n_replicates} | generating...",
+                flush=True,
+            )
             report = generate_report(prompt_id)
-            print(f"✅ prompt={prompt_id} replicate={rep} | validating...")
+            print(f"✅ prompt={prompt_id} replicate={rep} | validating...", flush=True)
             scores = validate_report(report)
             if cfg.save_full_reports:
                 report_path = OUT_DIR / f"report_prompt{prompt_id}_rep{rep:03d}.txt"
@@ -268,13 +306,20 @@ def summarize_and_test(df: pd.DataFrame) -> None:
     print("Descriptive summary (overall_score_0_100)")
     print("====================================================")
     print(df.groupby("prompt_id")["overall_score_0_100"].agg(["count", "mean", "std"]).round(2))
-    a = df.query('prompt_id == "A"')["overall_score_0_100"].to_numpy()
-    b = df.query('prompt_id == "B"')["overall_score_0_100"].to_numpy()
-    c = df.query('prompt_id == "C"')["overall_score_0_100"].to_numpy()
-    b_stat, b_p = bartlett(a, b, c)
-    print("\nBartlett test (homogeneity of variances)")
-    print(f"  statistic={b_stat:.4f}, p-value={b_p:.4g}")
-    equal_var = b_p >= 0.05
+    a = np.asarray(df.query('prompt_id == "A"')["overall_score_0_100"], dtype=np.float64)
+    b = np.asarray(df.query('prompt_id == "B"')["overall_score_0_100"], dtype=np.float64)
+    c = np.asarray(df.query('prompt_id == "C"')["overall_score_0_100"], dtype=np.float64)
+    equal_var = True
+    try:
+        b_stat, b_p = bartlett(a, b, c)
+        print("\nBartlett test (homogeneity of variances)")
+        print(f"  statistic={b_stat:.4f}, p-value={b_p:.4g}")
+        equal_var = bool(b_p >= 0.05)
+    except (ValueError, RuntimeError) as exc:
+        print("\nBartlett test (homogeneity of variances)")
+        print(f"  skipped ({type(exc).__name__}: {exc})")
+        print("  using Welch t-test (unequal variances) for A vs B")
+        equal_var = False
     print("\nOne-way ANOVA (overall_score_0_100 across A/B/C)")
     f_stat, p_anova = f_oneway(a, b, c)
     print(f"  F={f_stat:.4f}, p-value={p_anova:.4g}")
@@ -284,8 +329,14 @@ def summarize_and_test(df: pd.DataFrame) -> None:
 
 
 def main() -> None:
+    _line_buffer_stdout()
     parser = argparse.ArgumentParser(description="Run Homework 3 validation + prompt comparison experiment.")
     parser.add_argument("--n-replicates", type=int, default=N_REPLICATES, help="Replicates per prompt (A/B/C).")
+    parser.add_argument(
+        "--quick",
+        action="store_true",
+        help="Short run for local dev: 3 replicates per prompt (~18 LLM calls). Use ~30 per prompt for the course write-up.",
+    )
     parser.add_argument(
         "--save-full-reports",
         action=argparse.BooleanOptionalAction,
@@ -293,12 +344,19 @@ def main() -> None:
         help="Write each generated report under outputs/ as a .txt file.",
     )
     args = parser.parse_args()
+    if args.quick:
+        args.n_replicates = 3
+    ensure_local_ollama_ready()
+    total_calls = args.n_replicates * 3 * 2
     print("HW3 experiment")
     print(f"  project_root={PROJECT_ROOT}")
     print(f"  provider={AI_PROVIDER}")
+    if AI_PROVIDER == "ollama":
+        print(f"  ollama_model={OLLAMA_MODEL!r} @ {OLLAMA_HOST}")
     print(f"  out_dir={OUT_DIR}")
     print(f"  n_replicates={args.n_replicates}")
     print(f"  save_full_reports={args.save_full_reports}")
+    print(f"  approx_llm_calls={total_calls} (generate + validate per replicate)")
     df = run_experiment(RunConfig(n_replicates=args.n_replicates, save_full_reports=args.save_full_reports))
     csv_path = OUT_DIR / "hw3_validation_scores.csv"
     df.to_csv(csv_path, index=False)
