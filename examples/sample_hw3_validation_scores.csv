@@ -1,0 +1,10 @@
+prompt_id,replicate,overall_score_0_100,factual_alignment,structure_quality,decision_usefulness,hallucination_risk,clarity,brevity,reviewer_notes
+A,1,94,3,3,3,2,3,2,Aligned to table; memo format clear.
+A,2,91,3,2,3,2,2,3,Minor wording fluff; facts match.
+A,3,95,3,3,3,2,3,3,Strong neutral memo for staff.
+B,1,96,3,3,3,3,3,3,Headers help scan; numbers accurate.
+B,2,98,3,3,3,3,3,3,Tight sections; good for briefing.
+B,3,93,3,3,2,2,3,2,IMPLICATIONS slightly thin.
+C,1,92,3,2,3,2,2,2,Audit tone; flags uncertainty appropriately.
+C,2,88,3,2,2,2,2,2,Conservative language; still factual.
+C,3,95,3,3,3,2,3,2,Calls out support clearly.
