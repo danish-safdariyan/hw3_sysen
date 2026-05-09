@@ -1,0 +1,12 @@
+# Local secrets
+.env
+
+# Generated experiment outputs (CSV + report .txt files)
+outputs/
+
+# Python
+__pycache__/
+*.py[cod]
+.Python
+.venv/
+venv/
